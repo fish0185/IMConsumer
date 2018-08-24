@@ -18,7 +18,4 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="2.1.0" />
     <PackageReference Include="QRCoder" Version="1.3.3" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Infrastructure\" />
-  </ItemGroup>
 </Project>

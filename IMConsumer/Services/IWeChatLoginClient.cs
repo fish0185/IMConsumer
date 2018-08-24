@@ -8,17 +8,17 @@ using IMConsumer.Common;
 
 namespace IMConsumer.Services
 {
-    public interface IWeChatClient
+    public interface IWeChatLoginClient
     {
         Task<string> GetUuid();
         Task<string> Get(string url);
     }
 
-    public class WeChatHttpClient : IWeChatClient
+    public class WeChatLoginHttpClient : IWeChatLoginClient
     {
         private readonly HttpClient _httpClient; // not exposed publicly
 
-        public WeChatHttpClient(HttpClient client)
+        public WeChatLoginHttpClient(HttpClient client)
         {
             _httpClient = client;
         }

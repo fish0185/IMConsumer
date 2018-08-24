@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Threading.Tasks;
+using IMConsumer.Infrastructure;
 using IMConsumer.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,9 +34,10 @@ namespace IMConsumer
                 .ConfigureServices((hostContext, services) =>
                 {
                     services.AddLogging();
+                    services.AddTransient<IWeChatEngine, WeChatEngine>();
                     services.AddHostedService<LifetimeEventsHostedService>();
-                    services.AddHostedService<WeChatHostedService>();
-                    services.AddHttpClient<IWeChatClient, WeChatHttpClient>(c =>
+                    services.AddHostedService<WeChatHostedService>(); 
+                    services.AddHttpClient<IWeChatLoginClient, WeChatLoginHttpClient>(c =>
                     {
                         c.BaseAddress = new Uri("https://login.weixin.qq.com");
                         c.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");

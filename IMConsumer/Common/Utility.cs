@@ -38,17 +38,19 @@ namespace IMConsumer.Common
             return t;
         }
 
-        public static T Deserialize<T>(string input) where T : class
+        public static T XmlDeserialize<T>(string input, Action<T> transform = null) where T : class
         {
             XmlSerializer ser = new XmlSerializer(typeof(T));
 
             using (StringReader sr = new StringReader(input))
             {
-                return (T)ser.Deserialize(sr);
+                var model = (T)ser.Deserialize(sr);
+                transform?.Invoke(model);
+                return model;
             }
         }
 
-        public static string Serialize<T>(T ObjectToSerialize)
+        public static string XmlSerialize<T>(T ObjectToSerialize)
         {
             XmlSerializer xmlSerializer = new XmlSerializer(ObjectToSerialize.GetType());
 
