@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Net;
 using System.Net.Http;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Threading.Tasks;
 using IMConsumer.Common;
 using IMConsumer.Model;
@@ -19,7 +17,7 @@ namespace IMConsumer.Infrastructure
 {
     public interface IWeChatEngine
     {
-        event EventHandler<EventArgs> OnMessage;
+        event EventHandler<MessageEventArgs> OnMessage;
 
         Task Run();
 
@@ -28,30 +26,34 @@ namespace IMConsumer.Infrastructure
 
     public class WeChatEngine : IWeChatEngine
     {
-        public event EventHandler<EventArgs> OnMessage;
+        public event EventHandler<MessageEventArgs> OnMessage;
 
         private readonly ILogger<WeChatEngine> _logger;
+        private readonly ILoggerFactory _loggerFactory;
         private readonly IWeChatLoginClient _weChatClient;
         private string _deviceId = "e" + new Random().NextDouble().ToString("f16").Replace(".", string.Empty).Substring(1);     // 'e' + repr(random.random())[2:17]
-
         private IWeChatMessageClient _weChatMessageClient;
         private WeChatInitResponse weChatInitResponse;
         private WebLoginResponse webLoginResponse;
         private ClientLoginResponse clientLoginResponse;
-        private string sync_key_str = string.Empty;
+        private string _syncKey = string.Empty;
 
-        public WeChatEngine(ILogger<WeChatEngine> logger, IWeChatLoginClient weChatClient)
+        public WeChatEngine(
+            ILogger<WeChatEngine> logger, 
+            ILoggerFactory loggerFactory,
+            IWeChatLoginClient weChatClient)
         {
             _logger = logger;
+            _loggerFactory = loggerFactory;
             _weChatClient = weChatClient;
         }
 
         public async Task Run()
         {
-            _logger.LogInformation("Service started");
+            _logger.LogInformation("WeChat Engine Starting.....");
 
             var uuid = await _weChatClient.GetUuid();
-            GenerateQR("https://login.weixin.qq.com/l/" + uuid);
+            GenerateQR(UrlEndpoints.QRCode + uuid);
 
             clientLoginResponse = await WaitForLogin(uuid);
 
@@ -60,6 +62,7 @@ namespace IMConsumer.Infrastructure
             weChatInitResponse = await InitApp(webLoginResponse, clientLoginResponse);
 
             SyncMessage();
+            _logger.LogInformation("WeChat Engine Started.....");
         }
 
         private void SyncMessage()
@@ -72,29 +75,39 @@ namespace IMConsumer.Infrastructure
 
         private async Task Polling()
         {
-            await test_sync_check();
+            await TestSyncCheck();
             while (true)
             {
-                float check_time = (float)(DateTime.Now.ToUniversalTime() - new System.DateTime(1970, 1, 1)).TotalMilliseconds;
+                var check_time = DateTime.UtcNow.ToDouleUnixTimeStamp();
                 try
                 {
-                    string[] ReturnArray = await sync_check();//[retcode, selector] 
-                    string retcode = ReturnArray[0];
-                    string selector = ReturnArray[1];
+                    // fire a get request to wechat server
+                    // reponse will be telling you whether there is message/event 
+                    string[] syncCheckResult = await SyncCheck();
+                    string retcode = syncCheckResult[0];
+                    string selector = syncCheckResult[1];
 
-                    if (retcode == "1100")  //从微信客户端上登出
+                    if (retcode == "1100")
+                    {
+                        _logger.LogWarning("从微信客户端上登出");
                         break;
-                    else if (retcode == "1101") // 从其它设备上登了网页微信
+                    }
+                    else if (retcode == "1101")
+                    {
+                        _logger.LogWarning("从其它设备上登了网页微信");
                         break;
+                    }
                     else if (retcode == "0")
                     {
                         if (selector == "2")  // 有新消息
                         {
-                            JObject r = await sync();
-                            if (r != null)
+                            JObject result = await FetchMessage();
+                            if (result != null)
                             {
-                                //handle_msg(r);
-                                Console.WriteLine("has message");
+                                foreach (var msg in result["AddMsgList"].ToObject<List<MessageResponse>>().Where(msg => msg.MsgType != 51))
+                                {
+                                    OnMessage?.Invoke(this, new MessageEventArgs(msg));
+                                }
                             }
                         }
                         //else if ( selector == "3")  // 未知
@@ -105,11 +118,11 @@ namespace IMConsumer.Infrastructure
                         //}
                         else if (selector == "4")   //通讯录更新
                         {
-                            JObject r = await sync();
+                            JObject r = await FetchMessage();
                             if (r != null)
                             {
                                 //get_contact();
-                                Console.WriteLine("[INFO] Contacts Updated .");
+                                _logger.LogInformation("[INFO] Contacts Updated .");
                             }
                         }
                         else
@@ -123,69 +136,60 @@ namespace IMConsumer.Infrastructure
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("[ERROR] Except in proc_msg");
-                    Console.WriteLine(ex.ToString());
+                    _logger.LogError(ex, "Exception in Polling");
                 }
-                check_time = (float)(DateTime.Now.ToUniversalTime() - new System.DateTime(1970, 1, 1)).TotalMilliseconds - check_time;
-                if (check_time < 0.8)
-                    await Task.Delay((int)(1.0 - check_time) * 1000);
+
+                check_time = DateTime.UtcNow.ToDouleUnixTimeStamp() - check_time;
+                var sleepTime = 5000 - check_time;
+                if (sleepTime > 0)
+                {
+                    await Task.Delay((int)sleepTime);
+                }    
             }
         }
 
-        public async Task<JObject> sync()
+        private async Task<JObject> FetchMessage()
         {
-            string sync_json = "{{\"BaseRequest\" : {{\"DeviceID\":\"{6}\",\"Sid\":\"{1}\", \"Skey\":\"{5}\", \"Uin\":\"{0}\"}},\"SyncKey\" : {{\"Count\":{2},\"List\":[{3}]}},\"rr\" :{4}}}";
-            string sync_keys = "";
-            foreach (var p in weChatInitResponse.SyncKey.List)
+            var fetchRequest = new FetchMessageRequest
             {
-                sync_keys += "{\"Key\":" + p.Key + ",\"Val\":" + p.Val + "},";
-            }
-            sync_keys = sync_keys.TrimEnd(',');
-            sync_json = string.Format(sync_json, webLoginResponse.WxUin, webLoginResponse.WxSid, weChatInitResponse.SyncKey.List.Count(), sync_keys, (long)(DateTime.Now.ToUniversalTime() - new System.DateTime(1970, 1, 1)).TotalMilliseconds, webLoginResponse.Skey, _deviceId);
-
-            if (webLoginResponse.WxSid != null)
-            {
-                string sync_str = await _weChatMessageClient.Post(clientLoginResponse.BaseUri + "/webwxsync?sid=" + webLoginResponse.WxSid + "&lang=zh_CN&skey=" + webLoginResponse.Skey + "&pass_ticket=" + webLoginResponse.PassTicket, sync_json);
-
-
-                JObject sync_resul = JsonConvert.DeserializeObject(sync_str) as JObject;
-
-                if (sync_resul["SyncKey"]["Count"].ToString() != "0")
+                BaseRequest = new BaseRequest
                 {
-                    Dictionary<string, string> dic_sync_key_temp = new Dictionary<string, string>();
-                    foreach (JObject key in sync_resul["SyncKey"]["List"])
-                    {
-                        dic_sync_key_temp.Add(key["Key"].ToString(), key["Val"].ToString());
-                    }
-                    sync_key_str = "";
-                    foreach (KeyValuePair<string, string> p in dic_sync_key_temp)
-                    {
-                        sync_key_str += p.Key + "_" + p.Value + "%7C";
-                    }
-                    sync_key_str = sync_key_str.TrimEnd('%', '7', 'C');
-                }
-                return sync_resul;
-            }
-            else
+                    DeviceID = _deviceId,
+                    Sid = webLoginResponse.WxSid,
+                    Skey = webLoginResponse.Skey,
+                    Uin = webLoginResponse.WxUin.ToString()
+                },
+                SyncKey = weChatInitResponse.SyncKey,
+                DateTimeNow = DateTime.UtcNow.ToUnixTimeStamp()
+            };
+
+            var fetchRequestJson = JsonConvert.SerializeObject(fetchRequest);
+
+            if (webLoginResponse.WxSid == null)
             {
                 return null;
             }
-        }
 
-        private BaseRequest MapperToBaseRequest(WebLoginResponse webLoginResponse)
-        {
-            var br = new BaseRequest
+            var fetchMessageEndpoint = string.Format(UrlEndpoints.FetchMessage, clientLoginResponse.BaseUri, webLoginResponse.WxSid, webLoginResponse.Skey, webLoginResponse.PassTicket);
+            var messageStr = await _weChatMessageClient.Post(fetchMessageEndpoint, fetchRequestJson);
+            var messageResult = JsonConvert.DeserializeObject(messageStr) as JObject;
+            var newSyncKey = messageResult["SyncKey"].ToObject<SyncKey>();
+            weChatInitResponse.SyncKey = newSyncKey;
+            if (newSyncKey.Count > 0)
             {
-                Uin = webLoginResponse.WxUin.ToString(),
-                Sid = webLoginResponse.WxSid,
-                Skey = webLoginResponse.Skey,
-                DeviceID = _deviceId
-            };
+                _syncKey = newSyncKey.ToString();
+            }
 
-            return br;
-            //var base_request = "{{\"BaseRequest\":{{\"Uin\":\"{0}\",\"Sid\":\"{1}\",\"Skey\":\"{2}\",\"DeviceID\":\"{3}\"}}}}";
-            //return string.Format(base_request, webLoginResponse.WxUin, webLoginResponse.WxSid, webLoginResponse.Skey, _deviceId);
+            return messageResult;
         }
+
+        private BaseRequest MapperToBaseRequest(WebLoginResponse webLoginResponse) => new BaseRequest
+        {
+            Uin = webLoginResponse.WxUin.ToString(),
+            Sid = webLoginResponse.WxSid,
+            Skey = webLoginResponse.Skey,
+            DeviceID = _deviceId
+        };
 
         private async Task<WeChatInitResponse> InitApp(WebLoginResponse webLoginResponse, ClientLoginResponse clientLoginResponse)
         {
@@ -201,33 +205,23 @@ namespace IMConsumer.Infrastructure
 
             foreach (var syncKey in init.SyncKey.List)
             {
-                sync_key_str += (syncKey.Key.ToString() + "_" + syncKey.Val + "%7C");
+                _syncKey += (syncKey.Key + "_" + syncKey.Val + "%7C");
             }
-            sync_key_str = sync_key_str.TrimEnd('%', '7', 'C');
+            _syncKey = _syncKey.TrimEnd('%', '7', 'C');
 
             return init;
-
-            //foreach (JObject synckey in init_result["SyncKey"]["List"])  //同步键值
-            //{
-            //    dic_sync_key.Add(synckey["Key"].ToString(), synckey["Val"].ToString());
-            //}
-            //foreach (KeyValuePair<string, string> p in dic_sync_key)
-            //{
-            //    sync_key_str += p.Key + "_" + p.Value + "%7C";
-            //}
-            //sync_key_str = sync_key_str.TrimEnd('%', '7', 'C');
-            //return init_result["BaseResponse"]["Ret"].ToString() == "0";
         }
 
         private async Task<WebLoginResponse> Login(ClientLoginResponse response)
         {
             if (response.RedirectUri.Length < 4)
             {
-                Console.WriteLine("[ERROR] Login failed due to network problem, please try again.");
+                _logger.LogError("[ERROR] Login failed due to network problem, please try again.");
                 return null;
             }
-            CookieContainer cookie = new CookieContainer();
-            HttpClientHandler handler = new HttpClientHandler
+
+            var cookie = new CookieContainer();
+            var handler = new HttpClientHandler
             {
                 UseCookies = true,
                 CookieContainer = cookie
@@ -235,21 +229,21 @@ namespace IMConsumer.Infrastructure
             var http = new HttpClient(handler);
             var serverRes = await http.GetAsync(response.RedirectUri);
             var result = await serverRes.Content.ReadAsStringAsync();
-            _weChatMessageClient = new WeChatMessageClient(http);
+            _weChatMessageClient = new WeChatMessageClient(http, _loggerFactory);
 
             return Utility.XmlDeserialize<WebLoginResponse>(result, rep => rep.PassTicket = rep.PassTicket.UrlDecode());
         }
 
         private void GenerateQR(string url)
         {
-            QRCodeGenerator qrGenerator = new QRCodeGenerator();
-            QRCodeData qrCodeData = qrGenerator.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
-            QRCode qrCode = new QRCode(qrCodeData);
-            Bitmap qrCodeImage = qrCode.GetGraphic(20);
+            var qrGenerator = new QRCodeGenerator();
+            var qrCodeData = qrGenerator.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
+            var qrCode = new QRCode(qrCodeData);
+            var qrCodeImage = qrCode.GetGraphic(20);
             qrCodeImage.Save("QR.png");
         }
 
-        public async Task<ClientLoginResponse> WaitForLogin(string uuid)
+        private async Task<ClientLoginResponse> WaitForLogin(string uuid)
         {
             //     http comet:
             //tip=1, 等待用户扫描二维码,
@@ -266,7 +260,8 @@ namespace IMConsumer.Infrastructure
             string status_data = null;
             while (retry_time > 0)
             {
-                string login_result = await _weChatClient.Get("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?" + "tip=" + tip + "&uuid=" + uuid + "&_=" + Utility.ConvertDateTimeToInt(DateTime.Now));
+                var loginCheckUrl = string.Format(UrlEndpoints.LoginCheck, tip, uuid, Utility.ConvertDateTimeToInt(DateTime.Now));
+                var login_result = await _weChatClient.Get(loginCheckUrl);
                 Match match = Regex.Match(login_result, "window.code=(\\d+)");
                 if (match.Success)
                 {
@@ -276,11 +271,12 @@ namespace IMConsumer.Infrastructure
 
                 if (status_code == "201") //已扫描 未登录
                 {
-                    Console.WriteLine("[INFO] Please confirm to login .");
+                    _logger.LogInformation("Please confirm to login.");
                     tip = "0";
                 }
                 else if (status_code == "200")  //已扫描 已登录
                 {
+                    _logger.LogInformation("Login Success!");
                     match = Regex.Match(status_data, "window.redirect_uri=\"(\\S+?)\"");
                     if (match.Success)
                     {
@@ -298,7 +294,7 @@ namespace IMConsumer.Infrastructure
                 }
                 else if (status_code == "408")  //超时
                 {
-                    Console.WriteLine("[ERROR] WeChat login exception return_code=" + status_code + ". retry in" + try_later_secs + "secs later...");
+                    _logger.LogWarning("[ERROR] WeChat login exception return_code=" + status_code + ". retry in" + try_later_secs + "secs later...");
                     tip = "1";
                     retry_time -= 1;
                     await Task.Delay(try_later_secs * 1000);
@@ -312,63 +308,72 @@ namespace IMConsumer.Infrastructure
 
         public Task SendMessage(Message message)
         {
-            _logger.LogInformation("gooooood");
+            _logger.LogInformation("Sending Message...");
             return Task.CompletedTask;
         }
 
-        string sync_host = "web.wechat.com";
-
-        public async Task<bool> test_sync_check()
+        /// <summary>
+        /// Need to resovle sync Url from here
+        /// </summary>
+        /// <returns></returns>
+        private async Task<bool> TestSyncCheck()
         {
-            string retcode = "";
-            //sync_host = base_host;
-            //sync_host = "web.wechat.com";
             try
             {
-                retcode = (await sync_check())[0];
+                if((await SyncCheck())[0] == "0")
+                {
+                    return true;
+                }
             }
-            catch
+            catch(Exception ex)
             {
-                retcode = "-1";
+                _logger.LogError(ex, "Failed on TestSyncCheck");
             }
-            if (retcode == "0") return true;
+
+            return false;
             //sync_host = "webpush." + base_host;
             //sync_host = "webpush2." + base_host;
 
-            try
-            {
-                retcode = (await sync_check())[0];
-            }
-            catch
-            {
-                retcode = "-1";
-            }
-            if (retcode == "0") return true;
-            return false;
+            //try
+            //{
+            //    retcode = (await SyncCheck())[0];
+            //}
+            //catch
+            //{
+            //    retcode = "-1";
+            //}
+            //if (retcode == "0") return true;
+            //return false;
         }
 
-        public async Task<string[]> sync_check()
+        private async Task<string[]> SyncCheck()
         {
-            string retcode = "";
-            string selector = "";
-
-            string _synccheck_url = "https://{0}/cgi-bin/mmwebwx-bin/synccheck?sid={1}&uin={2}&synckey={3}&r={4}&skey={5}&deviceid={6}&_={7}";
-            _synccheck_url = string.Format(_synccheck_url, sync_host, webLoginResponse.WxSid, webLoginResponse.WxUin, sync_key_str, (long)(DateTime.Now.ToUniversalTime() - new System.DateTime(1970, 1, 1)).TotalMilliseconds, webLoginResponse.Skey.Replace("@", "%40"), _deviceId, Utility.ConvertDateTimeToInt(DateTime.Now));
             try
             {
-                string ReturnValue = await _weChatMessageClient.Get(_synccheck_url);
-                Match match = Regex.Match(ReturnValue, "window.synccheck=\\{retcode:\"(\\d+)\",selector:\"(\\d+)\"\\}");
+                var syncCheckEndpoint = string.Format(UrlEndpoints.SyncCheck,
+                    UrlEndpoints.SyncHost,
+                    webLoginResponse.WxSid, 
+                    webLoginResponse.WxUin, 
+                    _syncKey, 
+                    DateTime.UtcNow.ToUnixTimeStamp(), 
+                    webLoginResponse.Skey.Replace("@", "%40"),
+                    _deviceId, 
+                    Utility.ConvertDateTimeToInt(DateTime.Now));
+                var retcode = "";
+                var selector = "";
+                var ReturnValue = await _weChatMessageClient.Get(syncCheckEndpoint);
+                var match = Regex.Match(ReturnValue, "window.synccheck=\\{retcode:\"(\\d+)\",selector:\"(\\d+)\"\\}");
                 if (match.Success)
                 {
                     retcode = match.Groups[1].Value;
                     selector = match.Groups[2].Value;
                 }
-                return new string[2] { retcode, selector };
-
+                return new [] { retcode, selector };
             }
-            catch
+            catch(Exception ex)
             {
-                return new string[2] { "-1", "-1" };
+                _logger.LogError(ex, "SyncCheck Failed!");
+                return new [] { "-1", "-1" };
             }
         }
     }

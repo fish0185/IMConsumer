@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using IMConsumer.Infrastructure;
 using IMConsumer.Services;
@@ -14,6 +15,9 @@ namespace IMConsumer
     {
         static async Task Main(string[] args)
         {
+            EncodingProvider provider = CodePagesEncodingProvider.Instance;
+            Encoding.RegisterProvider(provider);
+            Console.OutputEncoding = Encoding.GetEncoding("GB2312");
             var host = new HostBuilder()
                 .ConfigureHostConfiguration(configHost =>
                 {

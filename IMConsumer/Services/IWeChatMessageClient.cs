@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
@@ -18,14 +19,17 @@ namespace IMConsumer.Services
     public class WeChatMessageClient : IWeChatMessageClient
     {
         private readonly HttpClient _httpClient;
+        private readonly ILogger<WeChatMessageClient> _logger;
 
-        public WeChatMessageClient(HttpClient httpClient)
+        public WeChatMessageClient(HttpClient httpClient, ILoggerFactory loggerFactory)
         {
             _httpClient = httpClient;
+            _logger = loggerFactory.CreateLogger<WeChatMessageClient>();
         }
 
         public async Task<string> Get(string url)
         {
+            _logger.LogInformation($"Get: {url}");
             string strResult = "";
             try
             {
@@ -38,12 +42,14 @@ namespace IMConsumer.Services
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, $"Get error: {url}");
             }
             return strResult;
         }
 
         public async Task<string> Post(string url, string text)
         {
+            _logger.LogInformation($"Post: {url} - {text}");
             string strResult = "";
             try
             {
@@ -58,6 +64,7 @@ namespace IMConsumer.Services
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, $"Post error: {url}");
             }
             return strResult;
         }

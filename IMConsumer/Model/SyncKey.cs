@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using System.Collections.Generic;
 
 namespace IMConsumer.Model
 {
@@ -9,6 +7,16 @@ namespace IMConsumer.Model
         public int Count { get; set; }
 
         public IEnumerable<SyncKeyKeyValue> List { get; set; }
+
+        public override string ToString()
+        {
+            var _syncKey = "";
+            foreach (var vk in List)
+            {
+                _syncKey += vk.Key + "_" + vk.Val + "%7C";
+            }
+            return _syncKey.TrimEnd('%', '7', 'C');
+        }
     }
 
     public struct SyncKeyKeyValue

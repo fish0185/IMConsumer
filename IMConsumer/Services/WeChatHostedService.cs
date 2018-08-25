@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,9 +36,9 @@ namespace IMConsumer.Services
             await _weChatEngine.SendMessage(new Message());
         }
 
-        private void _weChatEngine_OnMessage(object sender, EventArgs e)
+        private void _weChatEngine_OnMessage(object sender, MessageEventArgs e)
         {
-            _logger.LogInformation("you got meesage");
+            _logger.LogInformation("you got meesage: " + e.MessageResponse.Content);
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
