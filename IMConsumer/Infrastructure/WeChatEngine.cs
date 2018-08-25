@@ -21,7 +21,7 @@ namespace IMConsumer.Infrastructure
 
         Task Run();
 
-        Task SendMessage(Message message);
+        Task<bool> SendMessage(string message, string userName);
     }
 
     public class WeChatEngine : IWeChatEngine
@@ -33,9 +33,9 @@ namespace IMConsumer.Infrastructure
         private readonly IWeChatLoginClient _weChatClient;
         private string _deviceId = "e" + new Random().NextDouble().ToString("f16").Replace(".", string.Empty).Substring(1);     // 'e' + repr(random.random())[2:17]
         private IWeChatMessageClient _weChatMessageClient;
-        private WeChatInitResponse weChatInitResponse;
-        private WebLoginResponse webLoginResponse;
-        private ClientLoginResponse clientLoginResponse;
+        private WeChatInitResponse _weChatInitResponse;
+        private WebLoginResponse _webLoginResponse;
+        private ClientLoginResponse _clientLoginResponse;
         private string _syncKey = string.Empty;
         private GetContactResponse _contactsResponse;
 
@@ -56,11 +56,11 @@ namespace IMConsumer.Infrastructure
             var uuid = await _weChatClient.GetUuid();
             GenerateQR(UrlEndpoints.QRCode + uuid);
 
-            clientLoginResponse = await WaitForLogin(uuid);
+            _clientLoginResponse = await WaitForLogin(uuid);
 
-            webLoginResponse = await Login(clientLoginResponse);
+            _webLoginResponse = await Login(_clientLoginResponse);
 
-            weChatInitResponse = await InitApp(webLoginResponse, clientLoginResponse);
+            _weChatInitResponse = await InitApp(_webLoginResponse, _clientLoginResponse);
 
             await GetContacts();
 
@@ -160,32 +160,32 @@ namespace IMConsumer.Infrastructure
                 BaseRequest = new BaseRequest
                 {
                     DeviceID = _deviceId,
-                    Sid = webLoginResponse.WxSid,
-                    Skey = webLoginResponse.Skey,
-                    Uin = webLoginResponse.WxUin.ToString()
+                    Sid = _webLoginResponse.WxSid,
+                    Skey = _webLoginResponse.Skey,
+                    Uin = _webLoginResponse.WxUin.ToString()
                 },
-                SyncKey = weChatInitResponse.SyncKey,
+                SyncKey = _weChatInitResponse.SyncKey,
                 DateTimeNow = DateTime.UtcNow.ToUnixTimeStamp()
             };
 
             var fetchRequestJson = JsonConvert.SerializeObject(fetchRequest);
 
-            if (webLoginResponse.WxSid == null)
+            if (_webLoginResponse.WxSid == null)
             {
                 return null;
             }
 
             var fetchMessageEndpoint = string.Format(
                 UrlEndpoints.FetchMessage, 
-                clientLoginResponse.BaseUri,
-                webLoginResponse.WxSid,
-                webLoginResponse.Skey,
-                webLoginResponse.PassTicket);
+                _clientLoginResponse.BaseUri,
+                _webLoginResponse.WxSid,
+                _webLoginResponse.Skey,
+                _webLoginResponse.PassTicket);
 
             var messageStr = await _weChatMessageClient.Post(fetchMessageEndpoint, fetchRequestJson);
             var messageResult = JsonConvert.DeserializeObject(messageStr) as JObject;
             var newSyncKey = messageResult["SyncKey"].ToObject<SyncKey>();
-            weChatInitResponse.SyncKey = newSyncKey;
+            _weChatInitResponse.SyncKey = newSyncKey;
             if (newSyncKey.Count > 0)
             {
                 _syncKey = newSyncKey.ToString();
@@ -226,9 +226,9 @@ namespace IMConsumer.Infrastructure
         private async Task GetContacts()
         {
             var contactsUrl = string.Format(UrlEndpoints.Contacts, 
-                clientLoginResponse.BaseUri,
-                webLoginResponse.PassTicket,
-                webLoginResponse.Skey, 
+                _clientLoginResponse.BaseUri,
+                _webLoginResponse.PassTicket,
+                _webLoginResponse.Skey, 
                 Utility.ConvertDateTimeToInt(DateTime.Now));
 
             var result = await _weChatMessageClient.Get(contactsUrl);
@@ -330,10 +330,44 @@ namespace IMConsumer.Infrastructure
             return null;
         }
 
-        public Task SendMessage(Message message)
+        public async Task<bool> SendMessage(string message, string userName)
         {
             _logger.LogInformation("Sending Message...");
-            return Task.CompletedTask;
+            var user = _contactsResponse.MemberList.FindByUserName(userName);
+            if (user == null)
+            {
+                _logger.LogWarning($"User: {userName} not exist");
+                return false;
+            }
+
+            var messageEndpoint = string.Format(
+                UrlEndpoints.SendTextMessage, 
+                _clientLoginResponse.BaseUri,
+                _webLoginResponse.PassTicket);
+
+            Random rd = new Random();
+            double a = rd.NextDouble();
+            string para2 = a.ToString("f3").Replace(".", string.Empty);
+            string para1 = (DateTime.Now.ToUniversalTime() - new System.DateTime(1970, 1, 1)).TotalMilliseconds.ToString("f0");
+            string msg_id = para1 + para2;
+
+            var msg = new Message
+            {
+                BaseRequest = MapperToBaseRequest(_webLoginResponse),
+                Msg = new MessageBody
+                {
+                    Type = 1,
+                    FromUserName = _weChatInitResponse.User.UserName,
+                    ToUserName = user.UserName,
+                    ClientMsgId = msg_id,
+                    LocalID = msg_id,
+                    Content = Utility.ConvertGB2312ToUTF8(message)
+                }
+            };
+
+            await _weChatMessageClient.Post(messageEndpoint, JsonConvert.SerializeObject(msg));
+
+            return true;
         }
 
         /// <summary>
@@ -376,11 +410,11 @@ namespace IMConsumer.Infrastructure
             {
                 var syncCheckEndpoint = string.Format(UrlEndpoints.SyncCheck,
                     UrlEndpoints.SyncHost,
-                    webLoginResponse.WxSid, 
-                    webLoginResponse.WxUin, 
+                    _webLoginResponse.WxSid, 
+                    _webLoginResponse.WxUin, 
                     _syncKey, 
                     DateTime.UtcNow.ToUnixTimeStamp(), 
-                    webLoginResponse.Skey.Replace("@", "%40"),
+                    _webLoginResponse.Skey.Replace("@", "%40"),
                     _deviceId, 
                     Utility.ConvertDateTimeToInt(DateTime.Now));
                 var retcode = "";

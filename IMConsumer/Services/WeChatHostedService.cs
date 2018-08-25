@@ -33,7 +33,7 @@ namespace IMConsumer.Services
             _logger.LogInformation("Service Started!");
             await _weChatEngine.Run();
             _weChatEngine.OnMessage += _weChatEngine_OnMessage;
-            await _weChatEngine.SendMessage(new Message());
+            await _weChatEngine.SendMessage("中国人","101");
         }
 
         private void _weChatEngine_OnMessage(object sender, MessageEventArgs e)
