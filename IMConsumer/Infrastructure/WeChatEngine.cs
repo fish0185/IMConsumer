@@ -37,6 +37,7 @@ namespace IMConsumer.Infrastructure
         private WebLoginResponse webLoginResponse;
         private ClientLoginResponse clientLoginResponse;
         private string _syncKey = string.Empty;
+        private GetContactResponse _contactsResponse;
 
         public WeChatEngine(
             ILogger<WeChatEngine> logger, 
@@ -61,10 +62,14 @@ namespace IMConsumer.Infrastructure
 
             weChatInitResponse = await InitApp(webLoginResponse, clientLoginResponse);
 
+            await GetContacts();
+
             SyncMessage();
+
             _logger.LogInformation("WeChat Engine Started.....");
         }
 
+       
         private void SyncMessage()
         {
             Task.Factory.StartNew(async () =>
@@ -170,7 +175,13 @@ namespace IMConsumer.Infrastructure
                 return null;
             }
 
-            var fetchMessageEndpoint = string.Format(UrlEndpoints.FetchMessage, clientLoginResponse.BaseUri, webLoginResponse.WxSid, webLoginResponse.Skey, webLoginResponse.PassTicket);
+            var fetchMessageEndpoint = string.Format(
+                UrlEndpoints.FetchMessage, 
+                clientLoginResponse.BaseUri,
+                webLoginResponse.WxSid,
+                webLoginResponse.Skey,
+                webLoginResponse.PassTicket);
+
             var messageStr = await _weChatMessageClient.Post(fetchMessageEndpoint, fetchRequestJson);
             var messageResult = JsonConvert.DeserializeObject(messageStr) as JObject;
             var newSyncKey = messageResult["SyncKey"].ToObject<SyncKey>();
@@ -210,6 +221,19 @@ namespace IMConsumer.Infrastructure
             _syncKey = _syncKey.TrimEnd('%', '7', 'C');
 
             return init;
+        }
+
+        private async Task GetContacts()
+        {
+            var contactsUrl = string.Format(UrlEndpoints.Contacts, 
+                clientLoginResponse.BaseUri,
+                webLoginResponse.PassTicket,
+                webLoginResponse.Skey, 
+                Utility.ConvertDateTimeToInt(DateTime.Now));
+
+            var result = await _weChatMessageClient.Get(contactsUrl);
+
+            _contactsResponse = JsonConvert.DeserializeObject<GetContactResponse>(result);
         }
 
         private async Task<WebLoginResponse> Login(ClientLoginResponse response)

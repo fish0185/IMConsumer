@@ -10,6 +10,8 @@
 
         public const string QRCode = "https://login.weixin.qq.com/l/";
 
+        public const string Contacts = "{0}/webwxgetcontact?pass_ticket={1}&skey={2}&r={3}";
+
         public const string SyncCheck = "https://{0}/cgi-bin/mmwebwx-bin/synccheck?sid={1}&uin={2}&synckey={3}&r={4}&skey={5}&deviceid={6}&_={7}";
     }
 }

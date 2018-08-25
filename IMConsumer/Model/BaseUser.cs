@@ -12,7 +12,7 @@ namespace IMConsumer.Model
 
         public string NickName { get; set; }
 
-        public int AttrStatus { get; set; }
+        public long AttrStatus { get; set; }
 
         public string PYInitial { get; set; }
 
