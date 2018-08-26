@@ -1,5 +1,6 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
+using MassTransit;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -9,12 +10,16 @@ namespace IMConsumer.Services
     {
         private readonly ILogger _logger;
         private readonly IApplicationLifetime _appLifetime;
+        private readonly IBusControl _busControl;
 
         public LifetimeEventsHostedService(
-            ILogger<LifetimeEventsHostedService> logger, IApplicationLifetime appLifetime)
+            ILogger<LifetimeEventsHostedService> logger,
+            IApplicationLifetime appLifetime,
+            IBusControl busControl)
         {
             _logger = logger;
             _appLifetime = appLifetime;
+            _busControl = busControl;
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
@@ -22,13 +27,12 @@ namespace IMConsumer.Services
             _appLifetime.ApplicationStarted.Register(OnStarted);
             _appLifetime.ApplicationStopping.Register(OnStopping);
             _appLifetime.ApplicationStopped.Register(OnStopped);
-
-            return Task.CompletedTask;
+            return _busControl.StartAsync(cancellationToken);
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            return Task.CompletedTask;
+            return _busControl.StopAsync(cancellationToken);
         }
 
         private void OnStarted()

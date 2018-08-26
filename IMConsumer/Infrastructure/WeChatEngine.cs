@@ -27,6 +27,8 @@ namespace IMConsumer.Infrastructure
         Task<MediaUploadResponse> UploadFile(string filePath);
 
         Task<bool> SendPicture(string userName, string mediaId);
+
+        bool IsReady { get; }
     }
 
     public class WeChatEngine : IWeChatEngine
@@ -43,6 +45,8 @@ namespace IMConsumer.Infrastructure
         private ClientLoginResponse _clientLoginResponse;
         private string _syncKey = string.Empty;
         private GetContactResponse _contactsResponse;
+
+        public bool IsReady { get; set; }
 
         public WeChatEngine(
             ILogger<WeChatEngine> logger,
@@ -70,7 +74,7 @@ namespace IMConsumer.Infrastructure
             await GetContacts();
 
             SyncMessage();
-
+            IsReady = true;
             _logger.LogInformation("WeChat Engine Started.....");
         }
 

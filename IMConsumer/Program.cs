@@ -2,8 +2,13 @@
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using GreenPipes;
+using IMConsumer.Consumers;
 using IMConsumer.Infrastructure;
+using IMConsumer.Model;
 using IMConsumer.Services;
+using MassTransit;
+using MassTransit.ExtensionsDependencyInjectionIntegration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -15,8 +20,8 @@ namespace IMConsumer
     {
         static async Task Main(string[] args)
         {
-            EncodingProvider provider = CodePagesEncodingProvider.Instance;
-            Encoding.RegisterProvider(provider);
+            EncodingProvider encodingProvider = CodePagesEncodingProvider.Instance;
+            Encoding.RegisterProvider(encodingProvider);
             Console.OutputEncoding = Encoding.GetEncoding("GB2312");
             var host = new HostBuilder()
                 .ConfigureHostConfiguration(configHost =>
@@ -38,15 +43,38 @@ namespace IMConsumer
                 .ConfigureServices((hostContext, services) =>
                 {
                     services.AddLogging();
-                    services.AddTransient<IWeChatEngine, WeChatEngine>();
+                    services.AddSingleton<IWeChatEngine, WeChatEngine>();
                     services.AddHostedService<LifetimeEventsHostedService>();
-                    services.AddHostedService<WeChatHostedService>(); 
+                    services.AddHostedService<WeChatHostedService>();
                     services.AddHttpClient<IWeChatLoginClient, WeChatLoginHttpClient>(c =>
                     {
                         c.BaseAddress = new Uri("https://login.weixin.qq.com");
-                        c.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
-                        c.DefaultRequestHeaders.Add("User-Agent", "HttpClientFactory-Sample");
+                        c.DefaultRequestHeaders.Add("User-Agent", ConstValues.UserAgent);
                     });
+                    services.AddScoped<WeChatMessageConsumer>();
+                    services.AddMassTransit(x =>
+                    {
+                        // add the consumer, for LoadFrom
+                        x.AddConsumer<WeChatMessageConsumer>();
+                    });
+                    services.AddSingleton( provider => Bus.Factory.CreateUsingRabbitMq(cfg =>
+                    {
+                        var rabbitQHost = cfg.Host("localhost", "/", h => { });
+
+                        cfg.ReceiveEndpoint(rabbitQHost, "wechat-message", e =>
+                        {
+                            e.PrefetchCount = 16;
+                            e.UseMessageRetry(x => x.Interval(2, 100));
+
+                            e.LoadFrom(provider);
+
+                            EndpointConvention.Map<MessageResponse>(e.InputAddress);
+                        });
+                    }));
+
+                    services.AddSingleton<IPublishEndpoint>(provider => provider.GetRequiredService<IBusControl>());
+                    services.AddSingleton<ISendEndpointProvider>(provider => provider.GetRequiredService<IBusControl>());
+                    services.AddSingleton<IBus>(provider => provider.GetRequiredService<IBusControl>());
                 })
                 .ConfigureLogging((hostContext, configLogging) =>
                 {
