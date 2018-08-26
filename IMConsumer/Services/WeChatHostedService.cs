@@ -1,19 +1,9 @@
-﻿using System;
-using System.Drawing;
-using System.Net;
-using System.Net.Http;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
-using IMConsumer.Common;
 using IMConsumer.Infrastructure;
 using IMConsumer.Model;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using QRCoder;
 
 namespace IMConsumer.Services
 {
@@ -33,17 +23,19 @@ namespace IMConsumer.Services
             _logger.LogInformation("Service Started!");
             await _weChatEngine.Run();
             _weChatEngine.OnMessage += _weChatEngine_OnMessage;
-            await _weChatEngine.SendMessage("中国人","101");
+            await _weChatEngine.SendMessage("中文测试","101");
+            var result = await _weChatEngine.UploadFile(@"C:\Users\Gary\Desktop\contianerlink\2.png");
+            await _weChatEngine.SendPicture("101", result.MediaId);
         }
 
         private void _weChatEngine_OnMessage(object sender, MessageEventArgs e)
         {
-            _logger.LogInformation("you got meesage: " + e.MessageResponse.Content);
+            _logger.LogInformation("you got message: " + e.MessageResponse.Content);
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Service stoped");
+            _logger.LogInformation("Service stopped");
             return Task.CompletedTask;
         }
     }

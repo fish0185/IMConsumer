@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using QRCoder;
+using System.Diagnostics;
 
 namespace IMConsumer.Infrastructure
 {
@@ -22,6 +23,10 @@ namespace IMConsumer.Infrastructure
         Task Run();
 
         Task<bool> SendMessage(string message, string userName);
+
+        Task<MediaUploadResponse> UploadFile(string filePath);
+
+        Task<bool> SendPicture(string userName, string mediaId);
     }
 
     public class WeChatEngine : IWeChatEngine
@@ -40,7 +45,7 @@ namespace IMConsumer.Infrastructure
         private GetContactResponse _contactsResponse;
 
         public WeChatEngine(
-            ILogger<WeChatEngine> logger, 
+            ILogger<WeChatEngine> logger,
             ILoggerFactory loggerFactory,
             IWeChatLoginClient weChatClient)
         {
@@ -69,7 +74,7 @@ namespace IMConsumer.Infrastructure
             _logger.LogInformation("WeChat Engine Started.....");
         }
 
-       
+
         private void SyncMessage()
         {
             Task.Factory.StartNew(async () =>
@@ -87,7 +92,7 @@ namespace IMConsumer.Infrastructure
                 try
                 {
                     // fire a get request to wechat server
-                    // reponse will be telling you whether there is message/event 
+                    // reponse will be telling you whether there is message/event
                     string[] syncCheckResult = await SyncCheck();
                     string retcode = syncCheckResult[0];
                     string selector = syncCheckResult[1];
@@ -149,7 +154,7 @@ namespace IMConsumer.Infrastructure
                 if (sleepTime > 0)
                 {
                     await Task.Delay((int)sleepTime);
-                }    
+                }
             }
         }
 
@@ -176,7 +181,7 @@ namespace IMConsumer.Infrastructure
             }
 
             var fetchMessageEndpoint = string.Format(
-                UrlEndpoints.FetchMessage, 
+                UrlEndpoints.FetchMessage,
                 _clientLoginResponse.BaseUri,
                 _webLoginResponse.WxSid,
                 _webLoginResponse.Skey,
@@ -225,10 +230,10 @@ namespace IMConsumer.Infrastructure
 
         private async Task GetContacts()
         {
-            var contactsUrl = string.Format(UrlEndpoints.Contacts, 
+            var contactsUrl = string.Format(UrlEndpoints.Contacts,
                 _clientLoginResponse.BaseUri,
                 _webLoginResponse.PassTicket,
-                _webLoginResponse.Skey, 
+                _webLoginResponse.Skey,
                 Utility.ConvertDateTimeToInt(DateTime.Now));
 
             var result = await _weChatMessageClient.Get(contactsUrl);
@@ -264,7 +269,14 @@ namespace IMConsumer.Infrastructure
             var qrCodeData = qrGenerator.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
             var qrCode = new QRCode(qrCodeData);
             var qrCodeImage = qrCode.GetGraphic(20);
-            qrCodeImage.Save("QR.png");
+            qrCodeImage.Save("QRcode.png");
+            var p = new Process();
+            p.StartInfo = new ProcessStartInfo(@"C:\Windows\System32\mspaint.exe")
+            {
+                UseShellExecute = true,
+                Arguments = "QRcode.png"
+            };
+            p.Start();
         }
 
         private async Task<ClientLoginResponse> WaitForLogin(string uuid)
@@ -341,15 +353,9 @@ namespace IMConsumer.Infrastructure
             }
 
             var messageEndpoint = string.Format(
-                UrlEndpoints.SendTextMessage, 
+                UrlEndpoints.SendTextMessage,
                 _clientLoginResponse.BaseUri,
                 _webLoginResponse.PassTicket);
-
-            Random rd = new Random();
-            double a = rd.NextDouble();
-            string para2 = a.ToString("f3").Replace(".", string.Empty);
-            string para1 = (DateTime.Now.ToUniversalTime() - new System.DateTime(1970, 1, 1)).TotalMilliseconds.ToString("f0");
-            string msg_id = para1 + para2;
 
             var msg = new Message
             {
@@ -359,8 +365,6 @@ namespace IMConsumer.Infrastructure
                     Type = 1,
                     FromUserName = _weChatInitResponse.User.UserName,
                     ToUserName = user.UserName,
-                    ClientMsgId = msg_id,
-                    LocalID = msg_id,
                     Content = Utility.ConvertGB2312ToUTF8(message)
                 }
             };
@@ -410,12 +414,12 @@ namespace IMConsumer.Infrastructure
             {
                 var syncCheckEndpoint = string.Format(UrlEndpoints.SyncCheck,
                     UrlEndpoints.SyncHost,
-                    _webLoginResponse.WxSid, 
-                    _webLoginResponse.WxUin, 
-                    _syncKey, 
-                    DateTime.UtcNow.ToUnixTimeStamp(), 
+                    _webLoginResponse.WxSid,
+                    _webLoginResponse.WxUin,
+                    _syncKey,
+                    DateTime.UtcNow.ToUnixTimeStamp(),
                     _webLoginResponse.Skey.Replace("@", "%40"),
-                    _deviceId, 
+                    _deviceId,
                     Utility.ConvertDateTimeToInt(DateTime.Now));
                 var retcode = "";
                 var selector = "";
@@ -433,6 +437,48 @@ namespace IMConsumer.Infrastructure
                 _logger.LogError(ex, "SyncCheck Failed!");
                 return new [] { "-1", "-1" };
             }
+        }
+
+        public Task<MediaUploadResponse> UploadFile(string filePath)
+        {
+            MediaUploadRequest request = new MediaUploadRequest
+            {
+                BaseRequest = MapperToBaseRequest(_webLoginResponse),
+                ClientMediaId = DateTime.UtcNow.ToUnixTimeInSeconds(),
+                StartPos = 0,
+                MediaType = 4
+            };
+
+            return _weChatMessageClient.Upload(_webLoginResponse.PassTicket, filePath, request);
+        }
+
+        public async Task<bool> SendPicture(string userName, string mediaId)
+        {
+            var user = _contactsResponse.MemberList.FindByUserName(userName);
+            if (user == null)
+            {
+                _logger.LogWarning($"User: {userName} not exist");
+                return false;
+            }
+
+            var url = string.Format(UrlEndpoints.SendPicture, _clientLoginResponse.BaseUri, _webLoginResponse.PassTicket);
+
+            var msg = new Message
+            {
+                BaseRequest = MapperToBaseRequest(_webLoginResponse),
+                Msg = new MessageBody
+                {
+                    Type = 3,
+                    FromUserName = _weChatInitResponse.User.UserName,
+                    ToUserName = user.UserName,
+                    Content = "",
+                    MediaId = mediaId
+                }
+            };
+
+            await _weChatMessageClient.PostJson(url, msg);
+
+            return true;
         }
     }
 }

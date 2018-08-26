@@ -19,5 +19,10 @@ namespace IMConsumer.Common
         {
             return (datetime - new DateTime(1970, 1, 1)).TotalMilliseconds;
         }
+
+        public static long ToUnixTimeInSeconds(this DateTime datetime)
+        {
+            return (long)(datetime - new DateTime(1970, 1, 1)).TotalSeconds;
+        }
     }
 }

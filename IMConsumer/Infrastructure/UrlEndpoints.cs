@@ -14,6 +14,10 @@
 
         public const string SendTextMessage = "{0}/webwxsendmsg?pass_ticket={1}";
 
+        public const string SendPicture = "{0}/webwxsendmsgimg?fun=async&f=json&lang=en_US&pass_ticket={1}";
+
+        public const string FileUpload = "https://file.web.wechat.com/cgi-bin/mmwebwx-bin/webwxuploadmedia?f=json";
+
         public const string SyncCheck = "https://{0}/cgi-bin/mmwebwx-bin/synccheck?sid={1}&uin={2}&synckey={3}&r={4}&skey={5}&deviceid={6}&_={7}";
     }
 }
