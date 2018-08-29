@@ -2,9 +2,12 @@
 using System.Threading.Tasks;
 using IMConsumer.Infrastructure;
 using IMConsumer.Model;
+using IMConsumer.Options;
 using MassTransit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace IMConsumer.Services
 {

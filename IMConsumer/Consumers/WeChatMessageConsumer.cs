@@ -28,10 +28,7 @@ namespace IMConsumer.Consumers
             if (_weChatEngine.IsReady)
             {
                 // start Ai
-                if (context.Message.Content == "电话号码")
-                {
-                    _weChatEngine.SendMessage("0400000000", "101");
-                }
+                _weChatEngine.SendMessage(context.Message.Content, "101");
 
                 return Task.CompletedTask;
             }

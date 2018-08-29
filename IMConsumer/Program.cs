@@ -6,6 +6,7 @@ using GreenPipes;
 using IMConsumer.Consumers;
 using IMConsumer.Infrastructure;
 using IMConsumer.Model;
+using IMConsumer.Options;
 using IMConsumer.Services;
 using MassTransit;
 using MassTransit.ExtensionsDependencyInjectionIntegration;
@@ -23,6 +24,7 @@ namespace IMConsumer
             EncodingProvider encodingProvider = CodePagesEncodingProvider.Instance;
             Encoding.RegisterProvider(encodingProvider);
             Console.OutputEncoding = Encoding.GetEncoding("GB2312");
+
             var host = new HostBuilder()
                 .ConfigureHostConfiguration(configHost =>
                 {
@@ -42,6 +44,7 @@ namespace IMConsumer
                 })
                 .ConfigureServices((hostContext, services) =>
                 {
+                    var rabbitMqConfig = hostContext.Configuration.GetSection("RabbitMq").Get<RabbitMqConfig>();
                     services.AddLogging();
                     services.AddSingleton<IWeChatEngine, WeChatEngine>();
                     services.AddHostedService<LifetimeEventsHostedService>();
@@ -59,7 +62,11 @@ namespace IMConsumer
                     });
                     services.AddSingleton( provider => Bus.Factory.CreateUsingRabbitMq(cfg =>
                     {
-                        var rabbitQHost = cfg.Host("localhost", "/", h => { });
+                        var rabbitQHost = cfg.Host(new Uri(rabbitMqConfig.Endpoint),  "/", h =>
+                        {
+                            h.Username(rabbitMqConfig.UserName);
+                            h.Password(rabbitMqConfig.Password);
+                        });
 
                         cfg.ReceiveEndpoint(rabbitQHost, "wechat-message", e =>
                         {
